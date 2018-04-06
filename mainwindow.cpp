@@ -7,6 +7,9 @@
 #include <wiringPi.h>
 #include <QCloseEvent>
 #include <boost/date_time/gregorian/gregorian.hpp>
+#include <QFile>
+#include <QString>
+#include <QIODevice>
 
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -234,8 +237,6 @@ MainWindow::MainWindow(QWidget *parent) :
         daysShort.push_back(day);
     }
 
-    set_clicked();
-
     // TEST RELAYS page
     R1 = new QRadioButton("first (from gas heating)" ,test); R1->setToolTip("activate RELAY 1"); connect(R1,SIGNAL(toggled(bool)),this,SLOT(relay1()));
     R2 = new QRadioButton("second (acu charging)",test); R2->setToolTip("activate RELAY 2"); connect(R2,SIGNAL(toggled(bool)),this,SLOT(relay2()));
@@ -295,6 +296,8 @@ MainWindow::MainWindow(QWidget *parent) :
 
     test->setLayout(settings);
 
+    readThermostat();
+    set_clicked();   // comprises writeThermostat();
 }
 
 MainWindow::~MainWindow()
@@ -351,12 +354,15 @@ void MainWindow::set_clicked()
         if (checkBox->isChecked())
         {
             readData(daysShort[i]);
-            updateData(daysShort[i],days[i]);
         }
+        updateData(daysShort[i],days[i]);
         i++;
     }
     QVector<int> idColor = updateColorVector();
     plotCurves(idColor);
+
+    // save thermostat/parameters into file
+    writeThermostat();
 
 }
 
@@ -663,6 +669,84 @@ void MainWindow::programLoop()
 
 }
 
+void MainWindow::writeThermostat()
+{
+    qDebug() << "writing thermostat...";
+    QString filename = "thermParams";
+    QFile file(filename);
+    if (file.open(QIODevice::WriteOnly))
+    {
+        QTextStream out(&file);
+
+        out << dT1->text() << endl
+            << dT2->text() << endl
+            << minTAcu->text() << endl
+            << maxTAcu->text() << endl
+            << alarmT->text() << endl
+            << holdTemp->isChecked() << endl
+            << stovePriority->isChecked() << endl
+            << blockGas->isChecked() << endl
+            << tempSpin->value() << endl;
+
+        for (int j=0; j<7; j++)
+        {
+            out << daysShort[j].size() << endl;
+        }
+
+        for (int j=0; j<7; j++)
+        {
+            if (daysShort[j].size()>0)
+            {
+                for (int i=0; i<daysShort[j].size(); i++)
+                {
+                    out << daysShort[j][i][0] << " " << daysShort[j][i][1] << endl;
+                }
+            }
+        }
+        file.close();
+    }
+}
+
+void MainWindow::readThermostat()
+{
+    qDebug() << "reading thermostat...";
+    QString filename = "thermParams";
+    QFile file(filename);
+    if (file.open(QIODevice::ReadOnly))
+    {
+        QTextStream in(&file);
+
+        dT1->setText(in.readLine());
+        dT2->setText(in.readLine());
+        minTAcu->setText(in.readLine());
+        maxTAcu->setText(in.readLine());
+        alarmT->setText(in.readLine());
+        holdTemp->setChecked(in.readLine().toInt());
+        stovePriority->setChecked(in.readLine().toInt());
+        blockGas->setChecked(in.readLine().toInt());
+        tempSpin->setValue(in.readLine().toInt());
+
+        QVector<int> dayLength;
+
+        for (int i=0; i<7; i++)
+        {
+            dayLength.push_back(in.readLine().toInt());
+        }
+
+        for (int i=0; i<7; i++)
+        {
+            for (int j=0; j<dayLength[i]; j++)
+            {
+                QStringList textList = in.readLine().split(" ");
+                QVector<int> data;
+                data << textList.at(0).toInt() << textList.at(1).toInt();
+                daysShort[i].push_back(data);
+            }
+        }
+    }
+    file.close();
+}
+
 void MainWindow::readTemperature(QString fileName, float *temperature)
 {
     QFile file(fileName);
@@ -698,8 +782,9 @@ void MainWindow::updateTemperature()
     Worker* worker1 = new Worker();
     worker1->moveToThread(thread1);
     connect(thread1,SIGNAL(started()),worker1,SLOT(process1()));
-    connect(worker1,SIGNAL(finished1()),thread1,SLOT(quit()));
-    connect(worker1,SIGNAL(finished1()),worker1,SLOT(deleteLater()));
+    connect(worker1,SIGNAL(emitTemp(float)),this,SLOT(receiveTemp1(float)));
+    connect(worker1,SIGNAL(finished()),thread1,SLOT(quit()));
+    connect(worker1,SIGNAL(finished()),worker1,SLOT(deleteLater()));
     connect(thread1,SIGNAL(finished()),thread1,SLOT(deleteLater()));
     thread1->start();
 
@@ -707,8 +792,9 @@ void MainWindow::updateTemperature()
     Worker* worker2 = new Worker();
     worker2->moveToThread(thread2);
     connect(thread2,SIGNAL(started()),worker2,SLOT(process2()));
-    connect(worker2,SIGNAL(finished2()),thread2,SLOT(quit()));
-    connect(worker2,SIGNAL(finished2()),worker2,SLOT(deleteLater()));
+    connect(worker2,SIGNAL(emitTemp(float)),this,SLOT(receiveTemp2(float)));
+    connect(worker2,SIGNAL(finished()),thread2,SLOT(quit()));
+    connect(worker2,SIGNAL(finished()),worker2,SLOT(deleteLater()));
     connect(thread2,SIGNAL(finished()),thread2,SLOT(deleteLater()));
     thread2->start();
 
@@ -716,8 +802,9 @@ void MainWindow::updateTemperature()
     Worker* worker3 = new Worker();
     worker3->moveToThread(thread3);
     connect(thread3,SIGNAL(started()),worker3,SLOT(process3()));
-    connect(worker3,SIGNAL(finished3()),thread3,SLOT(quit()));
-    connect(worker3,SIGNAL(finished3()),worker3,SLOT(deleteLater()));
+    connect(worker3,SIGNAL(emitTemp(float)),this,SLOT(receiveTemp3(float)));
+    connect(worker3,SIGNAL(finished()),thread3,SLOT(quit()));
+    connect(worker3,SIGNAL(finished()),worker3,SLOT(deleteLater()));
     connect(thread3,SIGNAL(finished()),thread3,SLOT(deleteLater()));
     thread3->start();
 
@@ -725,10 +812,30 @@ void MainWindow::updateTemperature()
     Worker* worker4 = new Worker();
     worker4->moveToThread(thread4);
     connect(thread4,SIGNAL(started()),worker4,SLOT(process4()));
-    connect(worker4,SIGNAL(finished4()),thread4,SLOT(quit()));
-    connect(worker4,SIGNAL(finished4()),worker4,SLOT(deleteLater()));
+    connect(worker4,SIGNAL(emitTemp(float)),this,SLOT(receiveTemp4(float)));
+    connect(worker4,SIGNAL(finished()),thread4,SLOT(quit()));
+    connect(worker4,SIGNAL(finished()),worker4,SLOT(deleteLater()));
     connect(thread4,SIGNAL(finished()),thread4,SLOT(deleteLater()));
     thread4->start();
+}
+void MainWindow::receiveTemp1(float newTemp)
+{
+    sT = newTemp;
+}
+
+void MainWindow::receiveTemp2(float newTemp)
+{
+    aST = newTemp;
+}
+
+void MainWindow::receiveTemp3(float newTemp)
+{
+    aBT = newTemp;
+}
+
+void MainWindow::receiveTemp4(float newTemp)
+{
+    rT = newTemp;
 }
 
 void MainWindow::checkAlarm()
@@ -751,8 +858,8 @@ void MainWindow::alarmSound()
         Worker* worker1 = new Worker();
         worker1->moveToThread(thread1);
         connect(thread1,SIGNAL(started()),worker1,SLOT(process5()));
-        connect(worker1,SIGNAL(finished1()),thread1,SLOT(quit()));
-        connect(worker1,SIGNAL(finished1()),worker1,SLOT(deleteLater()));
+        connect(worker1,SIGNAL(finished()),thread1,SLOT(quit()));
+        connect(worker1,SIGNAL(finished()),worker1,SLOT(deleteLater()));
         connect(thread1,SIGNAL(finished()),thread1,SLOT(deleteLater()));
         thread1->start();
     }

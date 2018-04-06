@@ -106,6 +106,8 @@ private slots:
     void programLoop();
 
     void readTemperature(QString fileName, float *temperature);
+    void writeThermostat();
+    void readThermostat();
 
     void updateTemperature();
 
@@ -120,6 +122,11 @@ private slots:
     void closeEvent(QCloseEvent *event);
 
     void relaysOff();
+
+    void receiveTemp1(float newTemp);
+    void receiveTemp2(float newTemp);
+    void receiveTemp3(float newTemp);
+    void receiveTemp4(float newTemp);
 
 
 private:

@@ -4,48 +4,70 @@ Worker::Worker()
 {
 }
 
-void Worker::process1()
+void Worker::process1()   // stove sensor
 {
-    if (QFileInfo("/home/pi/testLayouts/w1_slave_1").exists())
-    {
-        QFile("/home/pi/testLayouts/w1_slave_1").remove();
-    }
-    system("cp /sys/bus/w1/devices/28-000006db7b69/w1_slave /home/pi/testLayouts/w1_slave_1");       // WITHOUT tape
-    emit finished1(); // stove sensor
+    float temp = readTemperature("/sys/bus/w1/devices/28-000006db7b69/w1_slave");
+    emit emitTemp(temp);
+    emit finished();
 }
 
-void Worker::process2()
+void Worker::process2()   // small accu
 {
-    if (QFileInfo("/home/pi/testLayouts/w1_slave_2").exists())
-    {
-        QFile("/home/pi/testLayouts/w1_slave_2").remove();
-    }
-    system("cp /sys/bus/w1/devices/28-0315902022ff/w1_slave /home/pi/testLayouts/w1_slave_2");       // WITHOUT tape
-    emit finished2();  // small accu
+    float temp = readTemperature("/sys/bus/w1/devices/28-0315902022ff/w1_slave");
+    emit emitTemp(temp);
+    emit finished();
 }
 
-void Worker::process3()
+void Worker::process3()   // big accu
 {
-    if (QFileInfo("/home/pi/testLayouts/w1_slave_3").exists())
-    {
-        QFile("/home/pi/testLayouts/w1_slave_3").remove();
-    }
-    system("cp /sys/bus/w1/devices/28-0315902484ff/w1_slave /home/pi/testLayouts/w1_slave_3");       // WITH tape
-    emit finished3();   // big accu
+    float temp = readTemperature("/sys/bus/w1/devices/28-0315902484ff/w1_slave");
+    emit emitTemp(temp);
+    emit finished();
 }
 
-void Worker::process4()
+void Worker::process4()   // room temperature
 {
-    if (QFileInfo("/home/pi/testLayouts/w1_slave_4").exists())
-    {
-        QFile("/home/pi/testLayouts/w1_slave_4").remove();
-    }
-    system("cp /sys/bus/w1/devices/28-00000883d788/w1_slave /home/pi/testLayouts/w1_slave_4");       // WITH tape
-    emit finished4();   // room temperature
+    float temp = readTemperature("/sys/bus/w1/devices/28-00000883d788/w1_slave");
+    emit emitTemp(temp);
+    emit finished();
 }
 
 void Worker::process5()
 {
     system("aplay /home/pi/testLayouts/FireAlarm.wav");    // alarm
-    emit finished5();
+    emit finished();
 }
+
+
+float Worker::readTemperature(QString fileName)
+{
+    float temperature = 0.1;
+    QFile file(fileName);
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QTextStream in(&file);
+
+        for (int i=0; i<2; ++i)
+        {
+            QString line = in.readLine();
+            QString trackName("t=");
+            int pos = line.indexOf(trackName);
+            if (pos>0)
+            {
+                QString theTrackName = line.mid(pos + trackName.length());
+                temperature = theTrackName.toFloat() * 1e-3;
+            }
+        }
+        file.close();
+    }
+    return temperature;
+}
+
+
+
+
+
+
+
+
+
