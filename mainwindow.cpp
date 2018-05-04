@@ -126,6 +126,9 @@ MainWindow::MainWindow(QWidget *parent) :
     stovePriority = new QCheckBox("stove priority", heating);   stovePriority->setToolTip("gas OFF when stove ON");  stovePriority->setChecked(true);
     gridLayout->addWidget(stovePriority,3,2,1,2,Qt::AlignBottom);
 
+    hotWater = new QCheckBox("water", heating);   hotWater->setToolTip("shower water will be prepared");
+    gridLayout->addWidget(hotWater,5,5,1,2,Qt::AlignTop);
+
     heating->setLayout(gridLayout);
 
     gridLayout->setMargin(0);
@@ -550,9 +553,14 @@ void MainWindow::programLoop()
         float minAcSTemp  = minTAcu->text().toFloat();
         float maxAcSTemp  = maxTAcu->text().toFloat();
         float tRT         = targetRoomTemp->text().toFloat();
+        bool chargeStove  = true;
+        bool chargeGas    = true;
         alarmTemp         = alarmT->text().toFloat();
 
         stoveON = digitalRead(16);           // from gas pump relay
+        gasON   = digitalRead(6);
+        charge  = digitalRead(13);
+        discharge = digitalRead(19);
 
         readTemperature("/home/pi/testLayouts/w1_slave_1", &sT);
         readTemperature("/home/pi/testLayouts/w1_slave_2", &aST);
@@ -564,107 +572,135 @@ void MainWindow::programLoop()
         acBTemp->setText(QString::number(aBT,'f',1));
         roomTemp->setText(QString::number(rT,'f',1));
 
+        //---------------HOT WATER---------------------------------
+
+        if ((aST<minAcSTemp-deltaAcu) && hotWater->isChecked()) // acu charching ON
+        {
+            if (stoveON  && (sT>aST+deltaAcu))
+            {
+                charge=true;
+            }
+            if ((!stoveON || !stovePriority->isChecked()) && !blockGas->isChecked())
+            {
+                charge=true;
+                gasON=true;
+            }
+        }
+        else if (!stoveON || !hotWater->isChecked() || (sT<aST+deltaAcu-delta) || (aST>minAcSTemp))
+        {
+            chargeStove=false;
+        }
+        else if ((stoveON && stovePriority->isChecked()) || !hotWater->isChecked() || blockGas->isChecked()
+                 || (aST>minAcSTemp))  // acu charging by stove OFF
+        {
+            chargeGas=false;
+            gasON=false;
+        }
+
+        charge = charge & chargeStove & chargeGas;
+
+
+
+        //-------------HEATING ON/OFF--------------------------------
+
         if (rT>tRT)         // heating OFF
         {
-            movieAcuPump->setPaused(true);
-            movieGasPump->setPaused(true);
-            gasLabel->setPixmap(pixmapGasBWSc);
-            digitalWrite(6,0); // gas heating OFF
+            discharge=false;
 
             if (stoveON && (sT>aST+deltaAcu) && (aST<maxAcSTemp))
             {
-                digitalWrite(13,1);  // acu charging ON
+                charge=true; // acu charching ON by stove
             }
             else if (!stoveON || (sT<aST+deltaAcu-delta) || (aST>maxAcSTemp+delta))
             {
-                digitalWrite(13,0);  // acu charging OFF (to radiators)
+                charge=false;  // acu charging OFF by stove (to radiators)
             }
 
-            if (digitalRead(13))     // acu charging ON
-            {
-                convLabel->hide();
-                valveLabel->setPixmap(pixmapValveChargeSc);
-                movieStovePump->setPaused(false);
-                stoveLabel->setPixmap(pixmapStoveSc);
-            }
-            else    // acu charging OFF
-            {
-                valveLabel->setPixmap(pixmapValveSc);
-                if (stoveON)
-                {
-                    convLabel->show();
-                    movieStovePump->setPaused(false);
-                    stoveLabel->setPixmap(pixmapStoveSc);
-                }
-                else
-                {
-                    convLabel->hide();
-                    movieStovePump->setPaused(true);
-                    stoveLabel->setPixmap(pixmapStoveBWSc);
-              }
-            }
         }
         else if (rT<tRT-delta)   // heating ON
         {
 
-            if ((aST>minAcSTemp) && !stoveON)
+            if ((aST>minAcSTemp+delta) && !stoveON)
             {
-                digitalWrite(19,1);   // from acu heating ON
+                discharge=true;   // from acu heating ON
+                charge=false;
+                gasON=false;
             }
-            else if ((aST<minAcSTemp-delta) || stoveON)
+            else if ((aST<minAcSTemp) || stoveON)
             {
-                digitalWrite(19,0);   // from acu heating OFF
+                discharge=false;   // from acu heating OFF
+
+                if ( !blockGas->isChecked() && (!stoveON || !stovePriority->isChecked()) )
+                {
+                    gasON=true;
+                }
+                else
+                {
+                    gasON=false;
+                }
             }
+        }
 
-            if (digitalRead(19))  // from acu heating ON
-            {
-                    convLabel->show();
 
-                    movieAcuPump->setPaused(false);
-                    valveLabel->setPixmap(pixmapValveDischargeSc);
 
-                    digitalWrite(6,0); // from gas heating OFF
-                    movieGasPump->setPaused(true);
-                    gasLabel->setPixmap(pixmapGasBWSc);
+        //-------------------------------------------
 
-                    movieStovePump->setPaused(true);
-                    stoveLabel->setPixmap(pixmapStoveBWSc);
-            }
-            else
-            {
-                    convLabel->hide();
+        convLabel->hide();
 
-                    movieAcuPump->setPaused(true);
-                    valveLabel->setPixmap(pixmapValveSc);
+        if (stoveON)
+        {
+            convLabel->show();
+            movieStovePump->setPaused(false);
+            stoveLabel->setPixmap(pixmapStoveSc);
+        }
+        else
+        {
+            movieStovePump->setPaused(true);
+            stoveLabel->setPixmap(pixmapStoveBWSc);
+        }
 
-                    if ( !blockGas->isChecked() && (!stoveON || !stovePriority->isChecked()) )
-                    {
-                        convLabel->show();
+        // -------------------------------------------
 
-                        digitalWrite(6,1); // from gas heating ON
-                        movieGasPump->setPaused(false);
-                        gasLabel->setPixmap(pixmapGasSc);
-                    }
-                    else
-                    {
-                        digitalWrite(6,0);  // from gas heating OFF
-                        movieGasPump->setPaused(true);
-                        gasLabel->setPixmap(pixmapGasBWSc);
-                    }
+        if (gasON)
+        {
+            convLabel->show();
+            digitalWrite(6,1); // from gas heating ON
+            movieGasPump->setPaused(false);
+            gasLabel->setPixmap(pixmapGasSc);
+        }
+        else
+        {
+            digitalWrite(6,0); // from gas heating OFF
+            movieGasPump->setPaused(true);
+            gasLabel->setPixmap(pixmapGasBWSc);
+        }
 
-                    if (stoveON)
-                    {
-                        convLabel->show();
+        //-------------------------------------------
 
-                        movieStovePump->setPaused(false);
-                        stoveLabel->setPixmap(pixmapStoveSc);
-                    }
-                    else
-                    {
-                        movieStovePump->setPaused(true);
-                        stoveLabel->setPixmap(pixmapStoveBWSc);
-                    }
-            }
+        if (charge)
+        {
+            convLabel->hide();
+            digitalWrite(13,1);  // acu charging ON
+            valveLabel->setPixmap(pixmapValveChargeSc);
+        }
+        else
+        {
+            digitalWrite(13,0);  // acu charging OFF
+            valveLabel->setPixmap(pixmapValveSc);
+        }
+
+        //-------------------------------------------
+
+        if (discharge)
+        {
+            convLabel->show();
+            digitalWrite(19,1);  // acu discharging ON
+            valveLabel->setPixmap(pixmapValveDischargeSc);
+        }
+        else
+        {
+            digitalWrite(19,0);  // acu discharging OFF
+            valveLabel->setPixmap(pixmapValveSc);
         }
 
 }
@@ -686,6 +722,7 @@ void MainWindow::writeThermostat()
             << holdTemp->isChecked() << endl
             << stovePriority->isChecked() << endl
             << blockGas->isChecked() << endl
+            << hotWater->isChecked() << endl
             << tempSpin->value() << endl;
 
         for (int j=0; j<7; j++)
@@ -724,6 +761,7 @@ void MainWindow::readThermostat()
         holdTemp->setChecked(in.readLine().toInt());
         stovePriority->setChecked(in.readLine().toInt());
         blockGas->setChecked(in.readLine().toInt());
+        hotWater->setChecked(in.readLine().toInt());
         tempSpin->setValue(in.readLine().toInt());
 
         QVector<int> dayLength;

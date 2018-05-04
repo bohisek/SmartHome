@@ -28,7 +28,7 @@ public:
     QVector<QCPGraph*> graphs;
     QList<QCheckBox *> l_checkboxes;
     QCheckBox *holdTemp;
-    QLabel *holdTempLabel;
+
 
 
     QMovie *movieAcuPump = new QMovie(":/pump_rotated.gif");
@@ -62,9 +62,10 @@ public:
     QLabel *ClockDate;
     QLabel *alarmLabel;
     QLabel *gasLabel, *stoveLabel, *convLabel, *valveLabel;
-    QCheckBox *blockGas, *stovePriority;
+    QLabel *holdTempLabel, *hotWaterLabel;
+    QCheckBox *blockGas, *stovePriority, *hotWater;
 
-    bool stoveON;
+    bool stoveON, gasON, charge, discharge;
     float rT, aST, aBT, sT, alarmTemp;
     QRadioButton *R1, *R2, *R3, *R4;
     QLineEdit *dT1, *dT2, *minTAcu, *maxTAcu, *alarmT;
