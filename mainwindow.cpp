@@ -38,6 +38,11 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(timer3,SIGNAL(timeout()),this,SLOT(alarmSound()));
     timer3->start(20000);
 
+    timerGasPump= new QTimer(this);
+    timerGasPump->setSingleShot(true); // fired only once
+    connect(timerGasPump,SIGNAL(timeout()),this,SLOT(gasPumpTimeout()));
+
+
 
     stackedWidget = new QStackedWidget(this);
     setCentralWidget(stackedWidget);
@@ -244,7 +249,7 @@ MainWindow::MainWindow(QWidget *parent) :
     R1 = new QRadioButton("first (from gas heating)" ,test); R1->setToolTip("activate RELAY 1"); connect(R1,SIGNAL(toggled(bool)),this,SLOT(relay1()));
     R2 = new QRadioButton("second (acu charging)",test); R2->setToolTip("activate RELAY 2"); connect(R2,SIGNAL(toggled(bool)),this,SLOT(relay2()));
     R3 = new QRadioButton("third (from acu heating)" ,test); R3->setToolTip("activate RELAY 3"); connect(R3,SIGNAL(toggled(bool)),this,SLOT(relay3()));
-    R4 = new QRadioButton("fourth (not in use)",test); R4->setToolTip("activate RELAY 4"); connect(R4,SIGNAL(toggled(bool)),this,SLOT(relay4()));
+    R4 = new QRadioButton("fourth (gas pump)",test); R4->setToolTip("activate RELAY 4"); connect(R4,SIGNAL(toggled(bool)),this,SLOT(relay4()));
 
     dT1 = new QLineEdit("1",test);              dT1->setMaximumSize(50,30);
     QLabel *dT1name = new QLabel("dT<sub>1</sub>", test);  dT1name->setMinimumWidth(60);
@@ -286,16 +291,29 @@ MainWindow::MainWindow(QWidget *parent) :
     alarmTLayout->addWidget(alarmT);
     alarmTLayout->addWidget(alarmTunit);    alarmTLayout->addStretch(1);
 
-    QVBoxLayout *settings = new QVBoxLayout;
-    settings->addLayout(dT1Layout);
-    settings->addLayout(dT2Layout);
-    settings->addLayout(minTAcuLayout);
-    settings->addLayout(maxTAcuLayout);
-    settings->addLayout(alarmTLayout); settings->addSpacing(20);
-    settings->addWidget(R1);
-    settings->addWidget(R2);
-    settings->addWidget(R3);
-    settings->addWidget(R4); settings->addStretch(1);
+    gasPumpDelay = new QLineEdit("5",test);                 gasPumpDelay->setMaximumSize(50,30);
+    QLabel *gasPumpDelayname = new QLabel("dt<sub>pump</sub>", test);    gasPumpDelayname->setMinimumWidth(60);
+    QLabel *gasPumpDelayunit = new QLabel(QString::fromUtf8("min"), test);  gasPumpDelayname->setToolTip("OFF delay of gas pump in minutes");
+    QHBoxLayout *gasPumpDelayLayout = new QHBoxLayout;
+    gasPumpDelayLayout->addWidget(gasPumpDelayname);
+    gasPumpDelayLayout->addWidget(gasPumpDelay);
+    gasPumpDelayLayout->addWidget(gasPumpDelayunit);    gasPumpDelayLayout->addStretch(1);
+
+    QGridLayout *settings = new QGridLayout;
+
+    settings->addLayout(dT1Layout,0,0);
+    settings->addLayout(dT2Layout,1,0);
+    settings->addLayout(gasPumpDelayLayout,2,0);
+
+    settings->addLayout(minTAcuLayout,0,1);
+    settings->addLayout(maxTAcuLayout,1,1);
+    settings->addLayout(alarmTLayout,2,1);
+
+    settings->addWidget(R1,3,0);
+    settings->addWidget(R2,4,0);
+    settings->addWidget(R3,5,0);
+    settings->addWidget(R4,6,0);
+
 
     test->setLayout(settings);
 
@@ -553,14 +571,16 @@ void MainWindow::programLoop()
         float minAcSTemp  = minTAcu->text().toFloat();
         float maxAcSTemp  = maxTAcu->text().toFloat();
         float tRT         = targetRoomTemp->text().toFloat();
+        float gasPumpDt   = gasPumpDelay->text().toFloat() * 60. * 1000.;  // OFF delay of gas pump in miliseconds
         bool chargeStove  = true;
         bool chargeGas    = true;
         alarmTemp         = alarmT->text().toFloat();
 
-        stoveON = digitalRead(16);           // from gas pump relay
-        gasON   = digitalRead(6);
-        charge  = digitalRead(13);
-        discharge = digitalRead(19);
+        stoveON     = digitalRead(16);           // from gas pump relay
+        gasONcharge = false;
+        gasON       = digitalRead(6);
+        charge      = digitalRead(13);
+        discharge   = digitalRead(19);
 
         readTemperature("/home/pi/testLayouts/w1_slave_1", &sT);
         readTemperature("/home/pi/testLayouts/w1_slave_2", &aST);
@@ -571,6 +591,7 @@ void MainWindow::programLoop()
         acSTemp->setText(QString::number(aST,'f',1));
         acBTemp->setText(QString::number(aBT,'f',1));
         roomTemp->setText(QString::number(rT,'f',1));
+
 
         //---------------HOT WATER---------------------------------
 
@@ -583,21 +604,20 @@ void MainWindow::programLoop()
             if ((!stoveON || !stovePriority->isChecked()) && !blockGas->isChecked())
             {
                 charge=true;
-                gasON=true;
+                gasONcharge=true;
             }
         }
-        else if (!stoveON || !hotWater->isChecked() || (sT<aST+deltaAcu-delta) || (aST>minAcSTemp))
+
+        if (!stoveON || !hotWater->isChecked() || (sT<aST+deltaAcu-delta) || (aST>minAcSTemp))
         {
             chargeStove=false;
         }
-        else if ((stoveON && stovePriority->isChecked()) || !hotWater->isChecked() || blockGas->isChecked()
-                 || (aST>minAcSTemp))  // acu charging by stove OFF
+
+        if ((stoveON && stovePriority->isChecked()) || !hotWater->isChecked() || blockGas->isChecked()
+                 || (aST>minAcSTemp))
         {
             chargeGas=false;
-            gasON=false;
         }
-
-        charge = charge & chargeStove & chargeGas;
 
 
 
@@ -606,31 +626,34 @@ void MainWindow::programLoop()
         if (rT>tRT)         // heating OFF
         {
             discharge=false;
+            gasON=false;
 
-            if (stoveON && (sT>aST+deltaAcu) && (aST<maxAcSTemp))
+            if (stoveON && (sT>aST+deltaAcu) && (aST<maxAcSTemp-delta))
             {
                 charge=true; // acu charching ON by stove
+                chargeStove=true;
             }
-            else if (!stoveON || (sT<aST+deltaAcu-delta) || (aST>maxAcSTemp+delta))
+            else if (!stoveON || (sT<aST+deltaAcu-delta) || (aST>maxAcSTemp))
             {
-                charge=false;  // acu charging OFF by stove (to radiators)
+                chargeStove=false;  // acu charging OFF by stove (to radiators)
             }
 
         }
         else if (rT<tRT-delta)   // heating ON
         {
 
-            if ((aST>minAcSTemp+delta) && !stoveON)
+            if ((aST>minAcSTemp+deltaAcu+delta) && !stoveON)
             {
-                discharge=true;   // from acu heating ON
-                charge=false;
-                gasON=false;
+                discharge  =true;   // from acu heating ON
+                charge     =false;
+                gasON      =false;
+                gasONcharge=false;
             }
-            else if ((aST<minAcSTemp) || stoveON)
+            else if ((aST<minAcSTemp+delta) || stoveON)
             {
                 discharge=false;   // from acu heating OFF
 
-                if ( !blockGas->isChecked() && (!stoveON || !stovePriority->isChecked()) )
+                if ( !blockGas->isChecked() && (!stoveON || !stovePriority->isChecked()))
                 {
                     gasON=true;
                 }
@@ -661,21 +684,25 @@ void MainWindow::programLoop()
 
         // -------------------------------------------
 
-        if (gasON)
+        if (gasON || gasONcharge)
         {
             convLabel->show();
-            digitalWrite(6,1); // from gas heating ON
+            digitalWrite(6,1);  // from gas heating ON
+            digitalWrite(26,1); // gas pump on
             movieGasPump->setPaused(false);
             gasLabel->setPixmap(pixmapGasSc);
+            timerGasPump->stop();
         }
         else
         {
             digitalWrite(6,0); // from gas heating OFF
-            movieGasPump->setPaused(true);
             gasLabel->setPixmap(pixmapGasBWSc);
+            if (!timerGasPump->isActive())   timerGasPump->start(gasPumpDt);
         }
 
         //-------------------------------------------
+        charge = charge & (chargeStove | chargeGas);
+
 
         if (charge)
         {
@@ -697,21 +724,36 @@ void MainWindow::programLoop()
             digitalWrite(19,1);  // acu discharging ON
             valveLabel->setPixmap(pixmapValveDischargeSc);
         }
-        else
+        else if (!discharge && !charge)
         {
             digitalWrite(19,0);  // acu discharging OFF
             valveLabel->setPixmap(pixmapValveSc);
         }
 
+        //qDebug() << "charge " << charge;
+        //qDebug() << "discharge " << discharge;
+        //qDebug() << "gasON " << gasON;
+        //qDebug() << "gasONcharge " << gasONcharge;
+
+
+
 }
+
+
+void MainWindow::gasPumpTimeout()
+{
+    digitalWrite(26,0);
+    movieGasPump->setPaused(true);
+}
+
 
 void MainWindow::writeThermostat()
 {
-    qDebug() << "writing thermostat...";
-    QString filename = "thermParams";
+    QString filename = "/home/pi/testLayouts/thermParams";
     QFile file(filename);
     if (file.open(QIODevice::WriteOnly))
     {
+        qDebug() << "writing thermostat...";
         QTextStream out(&file);
 
         out << dT1->text() << endl
@@ -719,6 +761,7 @@ void MainWindow::writeThermostat()
             << minTAcu->text() << endl
             << maxTAcu->text() << endl
             << alarmT->text() << endl
+            << gasPumpDelay->text() << endl
             << holdTemp->isChecked() << endl
             << stovePriority->isChecked() << endl
             << blockGas->isChecked() << endl
@@ -742,15 +785,19 @@ void MainWindow::writeThermostat()
         }
         file.close();
     }
+    else
+    {
+        qDebug() << "writing thermostat FAILED!";
+    }
 }
 
 void MainWindow::readThermostat()
 {
-    qDebug() << "reading thermostat...";
-    QString filename = "thermParams";
+    QString filename = "/home/pi/testLayouts/thermParams";
     QFile file(filename);
     if (file.open(QIODevice::ReadOnly))
     {
+        qDebug() << "reading thermostat...";
         QTextStream in(&file);
 
         dT1->setText(in.readLine());
@@ -758,6 +805,7 @@ void MainWindow::readThermostat()
         minTAcu->setText(in.readLine());
         maxTAcu->setText(in.readLine());
         alarmT->setText(in.readLine());
+        gasPumpDelay->setText(in.readLine());
         holdTemp->setChecked(in.readLine().toInt());
         stovePriority->setChecked(in.readLine().toInt());
         blockGas->setChecked(in.readLine().toInt());
@@ -781,6 +829,10 @@ void MainWindow::readThermostat()
                 daysShort[i].push_back(data);
             }
         }
+    }
+    else
+    {
+        qDebug() << "reading thermostat FAILED!";
     }
     file.close();
 }

@@ -6,7 +6,7 @@ Worker::Worker()
 
 void Worker::process1()   // stove sensor
 {
-    float temp = readTemperature("/sys/bus/w1/devices/28-000006db7b69/w1_slave");
+    float temp = readTemperature("/sys/bus/w1/devices/28-0117b34e1eff/w1_slave");
     emit emitTemp(temp);
     emit finished();
 }

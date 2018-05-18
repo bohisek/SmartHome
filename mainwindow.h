@@ -65,10 +65,10 @@ public:
     QLabel *holdTempLabel, *hotWaterLabel;
     QCheckBox *blockGas, *stovePriority, *hotWater;
 
-    bool stoveON, gasON, charge, discharge;
+    bool stoveON, gasON, gasONcharge, charge, discharge, gasPumpON;
     float rT, aST, aBT, sT, alarmTemp;
     QRadioButton *R1, *R2, *R3, *R4;
-    QLineEdit *dT1, *dT2, *minTAcu, *maxTAcu, *alarmT;
+    QLineEdit *dT1, *dT2, *minTAcu, *maxTAcu, *alarmT, *gasPumpDelay;
 
 
     int counter = 0;
@@ -109,6 +109,7 @@ private slots:
     void readTemperature(QString fileName, float *temperature);
     void writeThermostat();
     void readThermostat();
+    void gasPumpTimeout();
 
     void updateTemperature();
 
@@ -138,7 +139,7 @@ private:
     QDial *clockSpin;
     QDial *tempSpin;
     QCustomPlot *customPlot;
-    QTimer *timer2;
+    QTimer *timer2, *timerGasPump;
 };
 
 #endif // MAINWINDOW_H
