@@ -28,7 +28,7 @@ public:
     QVector<QCPGraph*> graphs;
     QList<QCheckBox *> l_checkboxes;
     QCheckBox *holdTemp;
-    QLabel *holdTempLabel;
+
 
 
     QMovie *movieAcuPump = new QMovie(":/pump_rotated.gif");
@@ -53,6 +53,8 @@ public:
     QPixmap pixmapConvSc;
     QPixmap *pixmapHoldTemp = new QPixmap(":/hold_icon.png");
     QPixmap pixmapHoldTempSc;
+    QPixmap *pixmapFan = new QPixmap(":/fanV3.png");
+    QPixmap pixmapFanSc;
 
     QLabel *targetRoomTemp;
     QLabel *roomTemp;
@@ -62,12 +64,14 @@ public:
     QLabel *ClockDate;
     QLabel *alarmLabel;
     QLabel *gasLabel, *stoveLabel, *convLabel, *valveLabel;
-    QCheckBox *blockGas, *stovePriority;
+    QLabel *holdTempLabel, *hotWaterLabel;
+    QLabel *fanLabel;
+    QCheckBox *blockGas, *stovePriority, *hotWater, *fan;
 
-    bool stoveON;
-    float rT, aST, aBT, sT, alarmTemp;
+    bool stoveON, gasON, gasONcharge, charge, discharge;
+    float rT = 0, aST = 0, aBT = 0, sT = 0, alarmTemp;
     QRadioButton *R1, *R2, *R3, *R4;
-    QLineEdit *dT1, *dT2, *minTAcu, *maxTAcu, *alarmT;
+    QLineEdit *dT1, *dT2, *minTAcu, *maxTAcu, *alarmT, *fanOnT;
 
 
     int counter = 0;
@@ -105,7 +109,8 @@ private slots:
 
     void programLoop();
 
-    void readTemperature(QString fileName, float *temperature);
+    void writeThermostat();
+    void readThermostat();
 
     void updateTemperature();
 
@@ -120,6 +125,11 @@ private slots:
     void closeEvent(QCloseEvent *event);
 
     void relaysOff();
+
+    void receiveTemp1(float newTemp);
+    void receiveTemp2(float newTemp);
+    void receiveTemp3(float newTemp);
+    void receiveTemp4(float newTemp);
 
 
 private:

@@ -11,11 +11,8 @@ public:
     explicit Worker();
 
 signals:
-    void finished1();
-    void finished2();
-    void finished3();
-    void finished4();
-    void finished5();
+    void emitTemp(float newTemp);
+    void finished();
 
 public slots:
     void process1();
@@ -23,7 +20,7 @@ public slots:
     void process3();
     void process4();
     void process5();
-
+    float readTemperature(QString fileName);
 };
 
 #endif // WORKER_H

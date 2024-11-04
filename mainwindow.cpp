@@ -7,6 +7,9 @@
 #include <wiringPi.h>
 #include <QCloseEvent>
 #include <boost/date_time/gregorian/gregorian.hpp>
+#include <QFile>
+#include <QString>
+#include <QIODevice>
 
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -27,14 +30,13 @@ MainWindow::MainWindow(QWidget *parent) :
     timer->start(1000);
 
     timer2 = new QTimer(this);
-    connect(timer2,SIGNAL(timeout()),this,SLOT(programLoop()));
     connect(timer2,SIGNAL(timeout()),this,SLOT(updateTemperature()));
-    timer2->start(5000);
+    timer2->start(3000);
 
     QTimer *timer3 = new QTimer(this);   // for alarm (sT >= alarmT)
+    connect(timer3,SIGNAL(timeout()),this,SLOT(programLoop()));
     connect(timer3,SIGNAL(timeout()),this,SLOT(alarmSound()));
-    timer3->start(20000);
-
+    timer3->start(5000);
 
     stackedWidget = new QStackedWidget(this);
     setCentralWidget(stackedWidget);
@@ -123,6 +125,17 @@ MainWindow::MainWindow(QWidget *parent) :
     stovePriority = new QCheckBox("stove priority", heating);   stovePriority->setToolTip("gas OFF when stove ON");  stovePriority->setChecked(true);
     gridLayout->addWidget(stovePriority,3,2,1,2,Qt::AlignBottom);
 
+    hotWater = new QCheckBox("water", heating);   hotWater->setToolTip("shower water will be prepared");
+    gridLayout->addWidget(hotWater,5,5,1,2,Qt::AlignVCenter|Qt::AlignLeft);
+
+    fan = new QCheckBox("fan", heating);   fan->setToolTip("fan for temperature homogeneity");
+    gridLayout->addWidget(fan,5,3,1,2,Qt::AlignVCenter|Qt::AlignLeft);
+    pixmapFanSc = pixmapFan->scaled(70,58);
+    fanLabel = new QLabel(heating);
+    fanLabel->setPixmap(pixmapFanSc);
+    fanLabel->hide();
+    gridLayout->addWidget(fanLabel,4,3,3,2,Qt::AlignCenter);
+
     heating->setLayout(gridLayout);
 
     gridLayout->setMargin(0);
@@ -175,7 +188,7 @@ MainWindow::MainWindow(QWidget *parent) :
     QVBoxLayout *tempLabels = new QVBoxLayout;
     tempLabels->addWidget(tempLabel);
     tempLabels->addWidget(tempNumberLabel);
-    tempLabels->addWidget(holdTemp); tempLabels->addStretch(0);void on_actionTest_triggered();
+    tempLabels->addWidget(holdTemp); tempLabels->addStretch(0);
     QGroupBox *groupBox = new QGroupBox;         groupBox->setMaximumWidth(80);
     QCheckBox *Mo = new QCheckBox("Mo",groupBox);
     QCheckBox *Tu = new QCheckBox("Tu",groupBox);
@@ -208,7 +221,7 @@ MainWindow::MainWindow(QWidget *parent) :
     //spinBoxes->addStretch(0);
     QHBoxLayout *spinsButtons = new QHBoxLayout;
     spinsButtons->addLayout(spinBoxes);
-    spinsButtons->addLayout(buttons);void on_actionTest_triggered();
+    spinsButtons->addLayout(buttons);
     QHBoxLayout *plotDays = new QHBoxLayout;
     plotDays->addLayout(customPlotBox);
     plotDays->addWidget(groupBox);
@@ -234,13 +247,11 @@ MainWindow::MainWindow(QWidget *parent) :
         daysShort.push_back(day);
     }
 
-    set_clicked();
-
     // TEST RELAYS page
     R1 = new QRadioButton("first (from gas heating)" ,test); R1->setToolTip("activate RELAY 1"); connect(R1,SIGNAL(toggled(bool)),this,SLOT(relay1()));
     R2 = new QRadioButton("second (acu charging)",test); R2->setToolTip("activate RELAY 2"); connect(R2,SIGNAL(toggled(bool)),this,SLOT(relay2()));
     R3 = new QRadioButton("third (from acu heating)" ,test); R3->setToolTip("activate RELAY 3"); connect(R3,SIGNAL(toggled(bool)),this,SLOT(relay3()));
-    R4 = new QRadioButton("fourth (not in use)",test); R4->setToolTip("activate RELAY 4"); connect(R4,SIGNAL(toggled(bool)),this,SLOT(relay4()));
+    R4 = new QRadioButton("fourth (fan)",test); R4->setToolTip("activate RELAY 4"); connect(R4,SIGNAL(toggled(bool)),this,SLOT(relay4()));
 
     dT1 = new QLineEdit("1",test);              dT1->setMaximumSize(50,30);
     QLabel *dT1name = new QLabel("dT<sub>1</sub>", test);  dT1name->setMinimumWidth(60);
@@ -282,19 +293,34 @@ MainWindow::MainWindow(QWidget *parent) :
     alarmTLayout->addWidget(alarmT);
     alarmTLayout->addWidget(alarmTunit);    alarmTLayout->addStretch(1);
 
-    QVBoxLayout *settings = new QVBoxLayout;
-    settings->addLayout(dT1Layout);
-    settings->addLayout(dT2Layout);
-    settings->addLayout(minTAcuLayout);
-    settings->addLayout(maxTAcuLayout);
-    settings->addLayout(alarmTLayout); settings->addSpacing(20);
-    settings->addWidget(R1);
-    settings->addWidget(R2);
-    settings->addWidget(R3);
-    settings->addWidget(R4); settings->addStretch(1);
+    fanOnT = new QLineEdit("24.5",test);                 fanOnT->setMaximumSize(50,30);
+    QLabel *fanOnTname = new QLabel("T<sub>fan</sub>", test);    fanOnTname->setMinimumWidth(60);
+    QLabel *fanOnTunit = new QLabel(QString::fromUtf8("°C"), test);  fanOnTname->setToolTip("Temperature when fan is turned ON");
+    QHBoxLayout *fanOnTLayout = new QHBoxLayout;
+    fanOnTLayout->addWidget(fanOnTname);
+    fanOnTLayout->addWidget(fanOnT);
+    fanOnTLayout->addWidget(fanOnTunit);    fanOnTLayout->addStretch(1);
+
+    QGridLayout *settings = new QGridLayout;
+
+    settings->addLayout(dT1Layout,0,0);
+    settings->addLayout(dT2Layout,1,0);
+    settings->addLayout(fanOnTLayout,2,0);
+
+    settings->addLayout(minTAcuLayout,0,1);
+    settings->addLayout(maxTAcuLayout,1,1);
+    settings->addLayout(alarmTLayout,2,1);
+
+    settings->addWidget(R1,3,0);
+    settings->addWidget(R2,4,0);
+    settings->addWidget(R3,5,0);
+    settings->addWidget(R4,6,0);
+
 
     test->setLayout(settings);
 
+    readThermostat();
+    set_clicked();   // comprises writeThermostat();
 }
 
 MainWindow::~MainWindow()
@@ -351,12 +377,15 @@ void MainWindow::set_clicked()
         if (checkBox->isChecked())
         {
             readData(daysShort[i]);
-            updateData(daysShort[i],days[i]);
         }
+        updateData(daysShort[i],days[i]);
         i++;
     }
     QVector<int> idColor = updateColorVector();
     plotCurves(idColor);
+
+    // save thermostat/parameters into file
+    writeThermostat();
 
 }
 
@@ -542,155 +571,248 @@ void MainWindow::programLoop()
         float delta       = dT1->text().toFloat();          // temperature difference
         float deltaAcu    = dT2->text().toFloat();
         float minAcSTemp  = minTAcu->text().toFloat();
-        float maxAcSTemp  = maxTAcu->text().toFloat();
         float tRT         = targetRoomTemp->text().toFloat();
+        float fT          = fanOnT->text().toFloat();
         alarmTemp         = alarmT->text().toFloat();
 
-        stoveON = digitalRead(16);           // from gas pump relay
-
-        readTemperature("/home/pi/testLayouts/w1_slave_1", &sT);
-        readTemperature("/home/pi/testLayouts/w1_slave_2", &aST);
-        readTemperature("/home/pi/testLayouts/w1_slave_3", &aBT);
-        readTemperature("/home/pi/testLayouts/w1_slave_4", &rT);
+        stoveON     = digitalRead(16);           // from stove pump relay
 
         stoveTemp->setText(QString::number(sT,'f',1));
         acSTemp->setText(QString::number(aST,'f',1));
         acBTemp->setText(QString::number(aBT,'f',1));
         roomTemp->setText(QString::number(rT,'f',1));
 
+        //---------------HOT WATER for SHOWER----------------------------------------
+
+        if (hotWater->isChecked() && (aST<minAcSTemp-deltaAcu)) // acu charching ON
+        {
+            charge=true;
+            if (!stoveON)
+            {
+                gasONcharge=true;
+            }
+        }
+        else if (!hotWater->isChecked() || (aST>minAcSTemp) ) // acu charching OFF
+        {
+            charge=false;
+            gasONcharge=false;
+        }
+
+        //------------- FLAT HEATING-------------------------------------------------
+
         if (rT>tRT)         // heating OFF
         {
-            movieAcuPump->setPaused(true);
-            movieGasPump->setPaused(true);
-            gasLabel->setPixmap(pixmapGasBWSc);
-            digitalWrite(6,0); // gas heating OFF
-
-            if (stoveON && (sT>aST+deltaAcu) && (aST<maxAcSTemp))
-            {
-                digitalWrite(13,1);  // acu charging ON
-            }
-            else if (!stoveON || (sT<aST+deltaAcu-delta) || (aST>maxAcSTemp+delta))
-            {
-                digitalWrite(13,0);  // acu charging OFF (to radiators)
-            }
-
-            if (digitalRead(13))     // acu charging ON
-            {
-                convLabel->hide();
-                valveLabel->setPixmap(pixmapValveChargeSc);
-                movieStovePump->setPaused(false);
-                stoveLabel->setPixmap(pixmapStoveSc);
-            }
-            else    // acu charging OFF
-            {
-                valveLabel->setPixmap(pixmapValveSc);
-                if (stoveON)
-                {
-                    convLabel->show();
-                    movieStovePump->setPaused(false);
-                    stoveLabel->setPixmap(pixmapStoveSc);
-                }
-                else
-                {
-                    convLabel->hide();
-                    movieStovePump->setPaused(true);
-                    stoveLabel->setPixmap(pixmapStoveBWSc);
-              }
-            }
+            discharge=false;
+            gasON=false;
         }
         else if (rT<tRT-delta)   // heating ON
         {
 
-            if ((aST>minAcSTemp) && !stoveON)
+            if (aST>minAcSTemp+deltaAcu)
             {
-                digitalWrite(19,1);   // from acu heating ON
+                discharge  =true;   // from acu heating ON
             }
-            else if ((aST<minAcSTemp-delta) || stoveON)
+            else if (aST<minAcSTemp+deltaAcu-delta)
             {
-                digitalWrite(19,0);   // from acu heating OFF
-            }
-
-            if (digitalRead(19))  // from acu heating ON
-            {
-                    convLabel->show();
-
-                    movieAcuPump->setPaused(false);
-                    valveLabel->setPixmap(pixmapValveDischargeSc);
-
-                    digitalWrite(6,0); // from gas heating OFF
-                    movieGasPump->setPaused(true);
-                    gasLabel->setPixmap(pixmapGasBWSc);
-
-                    movieStovePump->setPaused(true);
-                    stoveLabel->setPixmap(pixmapStoveBWSc);
-            }
-            else
-            {
-                    convLabel->hide();
-
-                    movieAcuPump->setPaused(true);
-                    valveLabel->setPixmap(pixmapValveSc);
-
-                    if ( !blockGas->isChecked() && (!stoveON || !stovePriority->isChecked()) )
-                    {
-                        convLabel->show();
-
-                        digitalWrite(6,1); // from gas heating ON
-                        movieGasPump->setPaused(false);
-                        gasLabel->setPixmap(pixmapGasSc);
-                    }
-                    else
-                    {
-                        digitalWrite(6,0);  // from gas heating OFF
-                        movieGasPump->setPaused(true);
-                        gasLabel->setPixmap(pixmapGasBWSc);
-                    }
-
-                    if (stoveON)
-                    {
-                        convLabel->show();
-
-                        movieStovePump->setPaused(false);
-                        stoveLabel->setPixmap(pixmapStoveSc);
-                    }
-                    else
-                    {
-                        movieStovePump->setPaused(true);
-                        stoveLabel->setPixmap(pixmapStoveBWSc);
-                    }
+                discharge=false;   // from acu heating OFF
+                gasON=true;
             }
         }
 
+        //--------------EXTRA IFs----------------------------------------------------
+
+        if ((stoveON && stovePriority->isChecked()) || blockGas->isChecked())
+        {
+            gasON=false;
+            gasONcharge=false;
+        }
+
+        if (!gasONcharge && (!stoveON  || (sT<aST+deltaAcu-delta)))
+        {
+            charge=false;
+        }
+
+        if (stoveON)
+        {
+            discharge=false;
+            gasONcharge=false;
+        }
+
+         //---------------FAN ON/OFF------------------
+
+        if ((rT>fT) && fan->isChecked())
+        {
+            digitalWrite(26,1);
+            fanLabel->show();
+        }
+        else if ((rT<fT-delta) || !fan->isChecked())
+        {
+            digitalWrite(26,0);
+            fanLabel->hide();
+        }
+
+        //---------------------------------------------------------------------------
+
+        convLabel->hide();
+        valveLabel->setPixmap(pixmapValveSc);    // default settings
+
+        if (stoveON)
+        {
+            convLabel->show();
+            movieStovePump->setPaused(false);
+            stoveLabel->setPixmap(pixmapStoveSc);
+        }
+        else
+        {
+            movieStovePump->setPaused(true);
+            stoveLabel->setPixmap(pixmapStoveBWSc);
+        }
+
+        //-------------------------------------------
+
+        if (gasON || gasONcharge)
+        {
+            convLabel->show();
+            digitalWrite(6,1);  // from gas heating ON
+            movieGasPump->setPaused(false);
+            gasLabel->setPixmap(pixmapGasSc);
+        }
+        else
+        {
+            digitalWrite(6,0); // from gas heating OFF
+            movieGasPump->setPaused(true);
+            gasLabel->setPixmap(pixmapGasBWSc);
+        }
+
+        if (charge)
+        {
+            convLabel->hide();
+            digitalWrite(13,1);  // acu charging ON
+            valveLabel->setPixmap(pixmapValveChargeSc);
+        }
+        else
+        {
+            digitalWrite(13,0);  // acu charging OFF
+        }
+
+        //-------------------------------------------
+
+        if (discharge)
+        {
+            convLabel->show();
+            digitalWrite(19,1);  // acu discharging ON
+            movieAcuPump->setPaused(false);
+            valveLabel->setPixmap(pixmapValveDischargeSc);
+        }
+	else
+        {
+            digitalWrite(19,0);  // acu discharging OFF
+            movieAcuPump->setPaused(true);
+        }
+
+
+        /*qDebug() << "charge " << charge;
+        qDebug() << "discharge " << discharge;
+        qDebug() << "gasON " << gasON;
+        qDebug() << "stoveON " << stoveON;*/
+
+        // end NEW loop
+
 }
 
-void MainWindow::readTemperature(QString fileName, float *temperature)
-{
-    QFile file(fileName);
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text))
-    {
-        QTextStream in(&file);
 
-        for (int i=0; i<2; ++i)
+void MainWindow::writeThermostat()
+{
+    QString filename = "/home/pi/testLayouts/thermParams";
+    QFile file(filename);
+    if (file.open(QIODevice::WriteOnly))
+    {
+        qDebug() << "writing thermostat...";
+        QTextStream out(&file);
+
+        out << dT1->text() << endl
+            << dT2->text() << endl
+            << minTAcu->text() << endl
+            << maxTAcu->text() << endl
+            << alarmT->text() << endl
+            << fanOnT->text() << endl
+            << holdTemp->isChecked() << endl
+            << stovePriority->isChecked() << endl
+            << blockGas->isChecked() << endl
+            << hotWater->isChecked() << endl
+            << fan->isChecked() << endl
+            << tempSpin->value() << endl;
+
+        for (int j=0; j<7; j++)
         {
-            QString line = in.readLine();
-            QString trackName("t=");
-            int pos = line.indexOf(trackName);
-            //qDebug() << "position is " << pos;
-            if (pos>0)
+            out << daysShort[j].size() << endl;
+        }
+
+        for (int j=0; j<7; j++)
+        {
+            if (daysShort[j].size()>0)
             {
-                QString theTrackName = line.mid(pos + trackName.length());
-                //qDebug() << theTrackName;
-                *temperature = theTrackName.toFloat() * 1e-3;
-                //if ((theTrackName.toFloat() * 1e-3 > 30) || (theTrackName.toFloat() * 1e-3 < 20))
-                if (theTrackName.toFloat() * 1e-3 < 18)
+                for (int i=0; i<daysShort[j].size(); i++)
                 {
-                    qDebug() << theTrackName << " ,the number: " << theTrackName.toFloat() * 1e-3;
+                    out << daysShort[j][i][0] << " " << daysShort[j][i][1] << endl;
                 }
             }
         }
         file.close();
     }
+    else
+    {
+        qDebug() << "writing thermostat FAILED!";
+    }
 }
+
+void MainWindow::readThermostat()
+{
+    QString filename = "/home/pi/testLayouts/thermParams";
+    QFile file(filename);
+    if (file.open(QIODevice::ReadOnly))
+    {
+        qDebug() << "reading thermostat...";
+        QTextStream in(&file);
+
+        dT1->setText(in.readLine());
+        dT2->setText(in.readLine());
+        minTAcu->setText(in.readLine());
+        maxTAcu->setText(in.readLine());
+        alarmT->setText(in.readLine());
+        fanOnT->setText(in.readLine());
+        holdTemp->setChecked(in.readLine().toInt());
+        stovePriority->setChecked(in.readLine().toInt());
+        blockGas->setChecked(in.readLine().toInt());
+        hotWater->setChecked(in.readLine().toInt());
+        fan->setChecked(in.readLine().toInt());
+        tempSpin->setValue(in.readLine().toInt());
+
+        QVector<int> dayLength;
+
+        for (int i=0; i<7; i++)
+        {
+            dayLength.push_back(in.readLine().toInt());
+        }
+
+        for (int i=0; i<7; i++)
+        {
+            for (int j=0; j<dayLength[i]; j++)
+            {
+                QStringList textList = in.readLine().split(" ");
+                QVector<int> data;
+                data << textList.at(0).toInt() << textList.at(1).toInt();
+                daysShort[i].push_back(data);
+            }
+        }
+    }
+    else
+    {
+        qDebug() << "reading thermostat FAILED!";
+    }
+    file.close();
+}
+
 
 void MainWindow::updateTemperature()
 {
@@ -698,8 +820,9 @@ void MainWindow::updateTemperature()
     Worker* worker1 = new Worker();
     worker1->moveToThread(thread1);
     connect(thread1,SIGNAL(started()),worker1,SLOT(process1()));
-    connect(worker1,SIGNAL(finished1()),thread1,SLOT(quit()));
-    connect(worker1,SIGNAL(finished1()),worker1,SLOT(deleteLater()));
+    connect(worker1,SIGNAL(emitTemp(float)),this,SLOT(receiveTemp1(float)));
+    connect(worker1,SIGNAL(finished()),thread1,SLOT(quit()));
+    connect(worker1,SIGNAL(finished()),worker1,SLOT(deleteLater()));
     connect(thread1,SIGNAL(finished()),thread1,SLOT(deleteLater()));
     thread1->start();
 
@@ -707,8 +830,9 @@ void MainWindow::updateTemperature()
     Worker* worker2 = new Worker();
     worker2->moveToThread(thread2);
     connect(thread2,SIGNAL(started()),worker2,SLOT(process2()));
-    connect(worker2,SIGNAL(finished2()),thread2,SLOT(quit()));
-    connect(worker2,SIGNAL(finished2()),worker2,SLOT(deleteLater()));
+    connect(worker2,SIGNAL(emitTemp(float)),this,SLOT(receiveTemp2(float)));
+    connect(worker2,SIGNAL(finished()),thread2,SLOT(quit()));
+    connect(worker2,SIGNAL(finished()),worker2,SLOT(deleteLater()));
     connect(thread2,SIGNAL(finished()),thread2,SLOT(deleteLater()));
     thread2->start();
 
@@ -716,8 +840,9 @@ void MainWindow::updateTemperature()
     Worker* worker3 = new Worker();
     worker3->moveToThread(thread3);
     connect(thread3,SIGNAL(started()),worker3,SLOT(process3()));
-    connect(worker3,SIGNAL(finished3()),thread3,SLOT(quit()));
-    connect(worker3,SIGNAL(finished3()),worker3,SLOT(deleteLater()));
+    connect(worker3,SIGNAL(emitTemp(float)),this,SLOT(receiveTemp3(float)));
+    connect(worker3,SIGNAL(finished()),thread3,SLOT(quit()));
+    connect(worker3,SIGNAL(finished()),worker3,SLOT(deleteLater()));
     connect(thread3,SIGNAL(finished()),thread3,SLOT(deleteLater()));
     thread3->start();
 
@@ -725,10 +850,30 @@ void MainWindow::updateTemperature()
     Worker* worker4 = new Worker();
     worker4->moveToThread(thread4);
     connect(thread4,SIGNAL(started()),worker4,SLOT(process4()));
-    connect(worker4,SIGNAL(finished4()),thread4,SLOT(quit()));
-    connect(worker4,SIGNAL(finished4()),worker4,SLOT(deleteLater()));
+    connect(worker4,SIGNAL(emitTemp(float)),this,SLOT(receiveTemp4(float)));
+    connect(worker4,SIGNAL(finished()),thread4,SLOT(quit()));
+    connect(worker4,SIGNAL(finished()),worker4,SLOT(deleteLater()));
     connect(thread4,SIGNAL(finished()),thread4,SLOT(deleteLater()));
     thread4->start();
+}
+void MainWindow::receiveTemp1(float newTemp)
+{
+    sT = newTemp;
+}
+
+void MainWindow::receiveTemp2(float newTemp)
+{
+    aST = newTemp;
+}
+
+void MainWindow::receiveTemp3(float newTemp)
+{
+    aBT = newTemp;
+}
+
+void MainWindow::receiveTemp4(float newTemp)
+{
+    rT = newTemp;
 }
 
 void MainWindow::checkAlarm()
@@ -751,8 +896,8 @@ void MainWindow::alarmSound()
         Worker* worker1 = new Worker();
         worker1->moveToThread(thread1);
         connect(thread1,SIGNAL(started()),worker1,SLOT(process5()));
-        connect(worker1,SIGNAL(finished1()),thread1,SLOT(quit()));
-        connect(worker1,SIGNAL(finished1()),worker1,SLOT(deleteLater()));
+        connect(worker1,SIGNAL(finished()),thread1,SLOT(quit()));
+        connect(worker1,SIGNAL(finished()),worker1,SLOT(deleteLater()));
         connect(thread1,SIGNAL(finished()),thread1,SLOT(deleteLater()));
         thread1->start();
     }
